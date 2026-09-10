@@ -31,8 +31,11 @@ type Options struct {
 	UpstreamStore    *limiter.UpstreamStore
 	UpstreamTimeout  time.Duration
 	UpstreamEditable bool
-	Logger           *slog.Logger
-	Version          string
+	// AdminToken, when non-empty, protects every control-plane route except the
+	// health/readiness probes.
+	AdminToken string
+	Logger     *slog.Logger
+	Version    string
 }
 
 // Server implements the control-plane HTTP handlers.
@@ -46,6 +49,7 @@ type Server struct {
 	upstreamStore    *limiter.UpstreamStore
 	upstreamTimeout  time.Duration
 	upstreamEditable bool
+	token            string
 	log              *slog.Logger
 	version          string
 	started          time.Time
@@ -78,6 +82,7 @@ func New(o Options) (*Server, error) {
 		upstreamStore:    o.UpstreamStore,
 		upstreamTimeout:  o.UpstreamTimeout,
 		upstreamEditable: o.UpstreamEditable,
+		token:            o.AdminToken,
 		log:              o.Logger,
 		version:          o.Version,
 		started:          time.Now(),
@@ -90,19 +95,22 @@ func New(o Options) (*Server, error) {
 // application keeps its own /api and /dashboard. Pass "" to mount at the root.
 func (s *Server) Register(mux *http.ServeMux, prefix string) {
 	p := strings.TrimSuffix(prefix, "/")
+	// Health and readiness stay open so container / load-balancer probes work
+	// without a token; everything else is guarded when a token is configured.
 	mux.HandleFunc("GET "+p+"/api/health", s.handleHealth)
-	mux.HandleFunc("GET "+p+"/api/stats", s.handleStats)
-	mux.HandleFunc("GET "+p+"/api/stream", s.handleStream)
-	mux.HandleFunc("GET "+p+"/api/policy", s.handlePolicyGet)
-	mux.HandleFunc("PUT "+p+"/api/policy", s.handlePolicySet)
-	mux.HandleFunc("POST "+p+"/api/policy", s.handlePolicySet)
-	mux.HandleFunc("GET "+p+"/api/clients", s.handleClients)
-	mux.HandleFunc("POST "+p+"/api/clients/reset", s.handleClientsReset)
-	mux.HandleFunc("GET "+p+"/api/upstream", s.handleUpstreamGet)
-	mux.HandleFunc("PUT "+p+"/api/upstream", s.handleUpstreamSet)
-	mux.HandleFunc("POST "+p+"/api/upstream", s.handleUpstreamSet)
 	mux.HandleFunc("GET "+p+"/healthz", s.handleHealth)
 	mux.HandleFunc("GET "+p+"/readyz", s.handleReady)
+
+	mux.HandleFunc("GET "+p+"/api/stats", s.guard(s.handleStats))
+	mux.HandleFunc("GET "+p+"/api/stream", s.guard(s.handleStream))
+	mux.HandleFunc("GET "+p+"/api/policy", s.guard(s.handlePolicyGet))
+	mux.HandleFunc("PUT "+p+"/api/policy", s.guard(s.handlePolicySet))
+	mux.HandleFunc("POST "+p+"/api/policy", s.guard(s.handlePolicySet))
+	mux.HandleFunc("GET "+p+"/api/clients", s.guard(s.handleClients))
+	mux.HandleFunc("POST "+p+"/api/clients/reset", s.guard(s.handleClientsReset))
+	mux.HandleFunc("GET "+p+"/api/upstream", s.guard(s.handleUpstreamGet))
+	mux.HandleFunc("PUT "+p+"/api/upstream", s.guard(s.handleUpstreamSet))
+	mux.HandleFunc("POST "+p+"/api/upstream", s.guard(s.handleUpstreamSet))
 	// Unknown control-plane paths must answer here rather than reach upstream.
 	mux.HandleFunc(p+"/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such control-plane endpoint: "+r.URL.Path)
