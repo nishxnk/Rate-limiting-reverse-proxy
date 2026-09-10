@@ -1,0 +1,99 @@
+# Brings up Redis and the rate-limiting reverse proxy together.
+#
+#   docker compose up --build          proxy + redis, dashboard on :8080
+#   docker compose --profile cluster up --build
+#                                      adds a second proxy on :8081 that shares
+#                                      the same Redis, so one global limit is
+#                                      enforced across both instances
+#   docker compose --profile httpbin up --build
+#                                      adds a real httpbin origin to proxy to
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rl-redis
+    # Rate limit state is disposable, so persistence is off for speed.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    restart: unless-stopped
+
+  proxy:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-docker}
+    container_name: rl-proxy
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      REDIS_ADDR: redis:6379
+      REDIS_TIMEOUT: 200ms
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
+      WINDOW_SIZE_SECONDS: ${WINDOW_SIZE_SECONDS:-1}
+      UPSTREAM_URL: ${UPSTREAM_URL:-mock://internal}
+      TRUST_PROXY_HEADERS: "false"
+      ADMIN_PREFIX: ${ADMIN_PREFIX:-/_rl}
+      DASHBOARD_ENABLED: "true"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/_rl/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Second instance, same Redis: proves the limit is global rather than
+  # per process. Started only with --profile cluster.
+  proxy-b:
+    profiles: ["cluster"]
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-docker}
+    container_name: rl-proxy-b
+    ports:
+      - "8081:8080"
+    environment:
+      PORT: 8080
+      REDIS_ADDR: redis:6379
+      REDIS_TIMEOUT: 200ms
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
+      WINDOW_SIZE_SECONDS: ${WINDOW_SIZE_SECONDS:-1}
+      UPSTREAM_URL: ${UPSTREAM_URL:-mock://internal}
+      ADMIN_PREFIX: ${ADMIN_PREFIX:-/_rl}
+      DASHBOARD_ENABLED: "true"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/_rl/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # A real origin to forward to. Start with --profile httpbin and set
+  # UPSTREAM_URL=http://httpbin:8080/anything
+  httpbin:
+    profiles: ["httpbin"]
+    image: mccutchen/go-httpbin:v2.15.0
+    container_name: rl-httpbin
+    ports:
+      - "8090:8080"
+    restart: unless-stopped

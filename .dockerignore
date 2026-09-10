@@ -1,0 +1,16 @@
+.git
+.gitignore
+.github
+bin/
+dist/
+docs/
+scripts/
+*.md
+!README.md
+.env
+.env.*
+!.env.example
+*_test.go
+testdata/
+.vscode/
+.idea/

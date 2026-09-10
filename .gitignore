@@ -1,0 +1,21 @@
+# binaries
+bin/
+dist/
+proxy
+proxy.exe
+
+# local environment
+.env
+.env.local
+
+# tooling output
+coverage.out
+coverage.html
+*.prof
+load-test-results/
+
+# editors
+.vscode/
+.idea/
+*.swp
+.DS_Store

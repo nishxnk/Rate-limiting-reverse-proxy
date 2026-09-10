@@ -1,0 +1,67 @@
+# Production shape for Model B: the rate limiter sits in front of YOUR app.
+#
+# Public traffic hits the proxy on :8080; the proxy forwards to your app and
+# protects it. The dashboard and control API are bound to a SEPARATE address
+# (127.0.0.1:9090) that is NOT published outside the host, so the
+# unauthenticated admin plane is never reachable from the internet.
+#
+#   1. set UPSTREAM_URL to your app (env or an .env file next to this)
+#   2. docker compose -f docker-compose.deploy.yml up --build -d
+#   3. put your TLS terminator (Caddy / nginx / cloud LB) in front of :8080
+#   4. reach the dashboard from the host only:  http://127.0.0.1:9090/dashboard
+#      (or over an SSH tunnel:  ssh -L 9090:127.0.0.1:9090 your-server)
+#
+# Point your domain's DNS / load balancer at this host once, and every request
+# is protected from then on - nothing to do per request.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  proxy:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-deploy}
+    restart: unless-stopped
+    # Public traffic port, exposed to the world (or to your TLS terminator).
+    ports:
+      - "8080:8080"
+      # Admin plane bound to loopback ON THE HOST only - never 0.0.0.0.
+      - "127.0.0.1:9090:9090"
+    environment:
+      PORT: 8080
+      # The dashboard + API live here, reachable only from the host.
+      ADMIN_ADDR: 0.0.0.0:9090
+      REDIS_ADDR: redis:6379
+      # --- set these for your deployment -------------------------------
+      UPSTREAM_URL: ${UPSTREAM_URL:?set UPSTREAM_URL to your app, e.g. http://app:3000}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-100}
+      WINDOW_SIZE_SECONDS: ${WINDOW_SIZE_SECONDS:-1}
+      # Lock the target: no runtime changes from the dashboard in production.
+      UPSTREAM_EDITABLE: "false"
+      # Turn on ONLY if a trusted load balancer sets X-Forwarded-For.
+      TRUST_PROXY_HEADERS: "false"
+      LOG_FORMAT: json
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The admin listener owns /healthz; hit it inside the container.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  redis-data:

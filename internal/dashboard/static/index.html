@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rate Limiter Control Plane</title>
+<style>
+:root{
+  --bg:#0b0f16; --panel:#121826; --panel2:#161e30; --line:#222c42;
+  --fg:#e6ecf7; --muted:#8b98b3; --dim:#5f6c86;
+  --ok:#3ecf8e; --warn:#f5a524; --bad:#f2545b; --accent:#5b8def; --accent2:#a06bff;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.5;
+  background-image:radial-gradient(1200px 600px at 15% -10%,rgba(91,141,239,.10),transparent 60%),
+                   radial-gradient(900px 500px at 95% 0%,rgba(160,107,255,.08),transparent 55%);}
+.wrap{max-width:1400px;margin:0 auto;padding:24px 20px 56px}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;margin-bottom:22px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.logo{width:38px;height:38px;border-radius:11px;flex:none;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:grid;place-items:center;font-weight:700;font-size:17px;color:#fff;box-shadow:0 6px 20px rgba(91,141,239,.35)}
+h1{font-size:17px;margin:0;letter-spacing:-.2px}
+.sub{color:var(--muted);font-size:12px;font-family:var(--mono)}
+.pills{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);
+  border-radius:999px;padding:6px 13px;font-size:12px;font-family:var(--mono);color:var(--muted);white-space:nowrap}
+.pill b{color:var(--fg);font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 3px rgba(62,207,142,.16)}
+.dot.warn{background:var(--warn);box-shadow:0 0 0 3px rgba(245,165,36,.16)}
+.dot.bad{background:var(--bad);box-shadow:0 0 0 3px rgba(242,84,91,.16)}
+.grid{display:grid;gap:16px}
+.cards{grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin-bottom:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.card .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.09em;margin-bottom:6px}
+.card .v{font-size:26px;font-weight:650;font-family:var(--mono);letter-spacing:-.5px;line-height:1.15}
+.card .n{color:var(--dim);font-size:11px;font-family:var(--mono);margin-top:4px}
+.v.ok{color:var(--ok)} .v.bad{color:var(--bad)} .v.warn{color:var(--warn)} .v.accent{color:var(--accent)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.panel h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.02em;padding:14px 18px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--panel2)}
+.panel h2 .hint{color:var(--dim);font-size:11px;font-weight:400;font-family:var(--mono)}
+.panel .body{padding:16px 18px}
+.cols{display:grid;grid-template-columns:1fr;gap:16px}
+@media(min-width:1080px){.cols{grid-template-columns:1.55fr 1fr}}
+canvas{display:block;width:100%;height:220px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);font-family:var(--mono);margin-top:10px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:-1px}
+form.policy{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+input[type=number],input[type=text]{width:100%;background:#0d121d;border:1px solid var(--line);color:var(--fg);
+  border-radius:10px;padding:9px 11px;font-family:var(--mono);font-size:14px}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,141,239,.18)}
+input:disabled{opacity:.5}
+button{background:linear-gradient(180deg,var(--accent),#4a78d8);border:none;color:#fff;font-weight:600;font-size:13px;
+  border-radius:10px;padding:10px 16px;cursor:pointer;font-family:var(--sans)}
+button:hover{filter:brightness(1.08)}
+button:disabled{opacity:.55;cursor:not-allowed;filter:none}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--muted)}
+button.ghost:hover{color:var(--fg);border-color:var(--accent)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.span2{grid-column:1/-1}
+.note{font-size:12px;font-family:var(--mono);margin-top:10px;min-height:18px}
+.note.ok{color:var(--ok)} .note.bad{color:var(--bad)} .note.muted{color:var(--dim)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+  font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+td{padding:8px 10px;border-bottom:1px solid rgba(34,44,66,.55);font-family:var(--mono);white-space:nowrap}
+tbody tr:hover{background:rgba(91,141,239,.06)}
+.tablewrap{max-height:340px;overflow:auto}
+.tag{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10.5px;border:1px solid var(--line);color:var(--muted)}
+.tag.key{color:var(--accent2);border-color:rgba(160,107,255,.4)}
+.tag.ip{color:var(--accent);border-color:rgba(91,141,239,.4)}
+.tag.redis{color:var(--ok);border-color:rgba(62,207,142,.4)}
+.tag.memory{color:var(--warn);border-color:rgba(245,165,36,.4)}
+.bar{height:6px;border-radius:4px;background:#0d121d;overflow:hidden;min-width:64px}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),#2bb77b)}
+.bar.low>i{background:linear-gradient(90deg,var(--warn),#e08b0c)}
+.bar.none>i{background:linear-gradient(90deg,var(--bad),#d43b43)}
+.empty{color:var(--dim);text-align:center;padding:26px 10px;font-family:var(--mono);font-size:12px}
+.strip{display:flex;flex-wrap:wrap;gap:3px;margin-top:14px;min-height:16px}
+.cell{width:11px;height:11px;border-radius:3px;background:#1b2438}
+.cell.ok{background:var(--ok)} .cell.blocked{background:var(--bad)} .cell.err{background:var(--warn)}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.tally{background:#0d121d;border:1px solid var(--line);border-radius:12px;padding:12px}
+.tally .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.tally .v{font-size:22px;font-weight:650;font-family:var(--mono)}
+.stack{height:10px;border-radius:6px;overflow:hidden;display:flex;background:#0d121d;margin-top:14px}
+.stack>i{display:block;height:100%;transition:width .18s ease}
+.stack>i.ok{background:var(--ok)} .stack>i.blocked{background:var(--bad)} .stack>i.err{background:var(--warn)}
+footer{margin-top:26px;color:var(--dim);font-size:11.5px;font-family:var(--mono);text-align:center}
+code{font-family:var(--mono);background:#0d121d;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:11.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="brand">
+    <div class="logo">RL</div>
+    <div>
+      <h1>Rate Limiter Control Plane</h1>
+      <div class="sub" id="upstream">upstream: &hellip;</div>
+    </div>
+  </div>
+  <div class="pills">
+    <span class="pill"><span class="dot" id="dotStream"></span>stream <b id="streamState">connecting</b></span>
+    <span class="pill"><span class="dot" id="dotBackend"></span>backend <b id="backendState">&mdash;</b></span>
+    <span class="pill">uptime <b id="uptime">&mdash;</b></span>
+    <span class="pill">v<b id="version">dev</b></span>
+  </div>
+</header>
+
+<div class="grid cards">
+  <div class="card"><div class="k">Total requests</div><div class="v" id="mTotal">0</div><div class="n" id="mRps">0 req/s</div></div>
+  <div class="card"><div class="k">Allowed</div><div class="v ok" id="mAllowed">0</div><div class="n" id="mAllowedPct">&mdash;</div></div>
+  <div class="card"><div class="k">Blocked (429)</div><div class="v bad" id="mBlocked">0</div><div class="n" id="mBlockedPct">&mdash;</div></div>
+  <div class="card"><div class="k">Upstream errors</div><div class="v warn" id="mErrors">0</div><div class="n">5xx from origin</div></div>
+  <div class="card"><div class="k">Avg latency</div><div class="v accent" id="mLatency">0 ms</div><div class="n">proxy round trip</div></div>
+  <div class="card"><div class="k">Tracked clients</div><div class="v" id="mClients">0</div><div class="n" id="mKeys">0 limiter keys</div></div>
+</div>
+
+<div class="grid cols">
+  <section class="panel">
+    <h2>Live traffic <span class="hint" id="chartHint">allowed vs 429, per second</span></h2>
+    <div class="body">
+      <canvas id="chart" height="220"></canvas>
+      <div class="legend">
+        <span><i style="background:#3ecf8e"></i>allowed</span>
+        <span><i style="background:#f2545b"></i>blocked (429)</span>
+        <span><i style="background:#f5a524"></i>upstream 5xx</span>
+        <span id="chartPeak"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Policy <span class="hint">applied to every instance</span></h2>
+    <div class="body">
+      <form class="policy" id="policyForm" autocomplete="off">
+        <div>
+          <label for="rps">Requests per window</label>
+          <input type="number" id="rps" name="rps" min="1" max="1000000" step="1" required>
+        </div>
+        <div>
+          <label for="window">Window size (seconds)</label>
+          <input type="number" id="window" name="window_seconds" min="1" max="3600" step="1" required>
+        </div>
+        <div class="span2 row">
+          <button type="submit" id="policyApply">Apply policy</button>
+          <button type="button" class="ghost" id="policyReset">Revert</button>
+          <span class="sub" id="effective"></span>
+        </div>
+      </form>
+      <div class="note muted" id="policyNote">Changes take effect immediately and are published to every proxy instance through Redis.</div>
+
+      <div style="border-top:1px solid var(--line);margin:16px -18px 0;padding:16px 18px 0">
+        <form class="policy" id="upstreamForm" autocomplete="off">
+          <div class="span2">
+            <label for="upstreamUrl">Upstream target &mdash; paste any live website URL</label>
+            <input type="text" id="upstreamUrl" name="url" spellcheck="false" autocapitalize="off"
+                   placeholder="https://example.com  (or mock://internal)" maxlength="2048">
+          </div>
+          <div class="span2 row">
+            <button type="submit" id="upstreamApply">Point proxy here</button>
+            <a id="openSite" href="/" target="_blank" rel="noopener"><button type="button" class="ghost">Open site &#8599;</button></a>
+            <span class="sub" id="upstreamCurrent"></span>
+          </div>
+        </form>
+        <div class="note muted" id="upstreamNote">Every request to this proxy is forwarded here. The change is instant and shared with the whole fleet.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="grid cols" style="margin-top:16px">
+  <section class="panel">
+    <h2>Tracked clients <span class="hint" id="clientsHint">remaining allowance per key</span></h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th>Client</th><th>Type</th><th>Requests</th><th>429</th>
+          <th>Remaining</th><th>Resets in</th><th>Backend</th><th>Idle</th>
+        </tr></thead>
+        <tbody id="clientRows"><tr><td colspan="8" class="empty">no traffic yet &mdash; send a request to <code>/</code> or run the simulator</td></tr></tbody>
+      </table>
+    </div>
+    <div class="body" style="border-top:1px solid var(--line)">
+      <div class="row">
+        <button type="button" class="ghost" id="clearClients">Clear tracked clients</button>
+        <span class="note muted" id="fleetNote" style="margin:0"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Stress simulator <span class="hint">fires real requests through the proxy</span></h2>
+    <div class="body">
+      <form class="policy" id="stressForm" autocomplete="off">
+        <div>
+          <label for="stressCount">Requests</label>
+          <input type="number" id="stressCount" min="1" max="500" step="1" value="50">
+        </div>
+        <div>
+          <label for="stressConc">Concurrency</label>
+          <input type="number" id="stressConc" min="1" max="100" step="1" value="25">
+        </div>
+        <div class="span2">
+          <label for="stressKey">Identify as (X-API-Key, blank to use this browser IP)</label>
+          <input type="text" id="stressKey" value="stress-simulator" maxlength="64" spellcheck="false">
+        </div>
+        <div class="span2">
+          <label for="stressPath">Upstream path to hit</label>
+          <input type="text" id="stressPath" value="/" maxlength="200" spellcheck="false" placeholder="/">
+        </div>
+        <div class="span2 row">
+          <button type="submit" id="stressRun">Run stress test</button>
+          <button type="button" class="ghost" id="stressClear">Clear</button>
+        </div>
+      </form>
+
+      <div class="stack" id="stressStack">
+        <i class="ok" style="width:0%"></i><i class="blocked" style="width:0%"></i><i class="err" style="width:0%"></i>
+      </div>
+      <div class="split">
+        <div class="tally"><div class="k">200 OK</div><div class="v ok" id="sOk">0</div></div>
+        <div class="tally"><div class="k">429 Blocked</div><div class="v bad" id="sBlocked">0</div></div>
+      </div>
+      <div class="strip" id="stressStrip"></div>
+      <div class="note muted" id="stressNote">Each cell is one request, in dispatch order.</div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  distributed sliding-window rate limiter &middot; redis primary with in-memory fallback &middot;
+  <code id="epStats"></code> <code id="epStream"></code> <code id="epPolicy"></code>
+</footer>
+</div>
+<script>
+(function(){
+"use strict";
+
+var $ = function(id){ return document.getElementById(id); };
+
+// The page is served at <prefix>/dashboard (with or without a trailing slash),
+// so the control-plane base is simply this path minus the /dashboard suffix.
+// Deriving it here keeps the HTML a static asset - no templating, no config
+// injection - while letting ADMIN_PREFIX move the whole plane freely.
+var BASE = (function(){
+  var path = location.pathname;
+  if (path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+  var at = path.indexOf("/dashboard");
+  return at >= 0 ? path.slice(0, at) : "";
+})();
+var last = null;
+var policyDirty = false;
+
+function fmt(n){
+  n = Number(n) || 0;
+  if (n >= 1e6) return (n/1e6).toFixed(1) + "M";
+  if (n >= 1e4) return (n/1e3).toFixed(1) + "k";
+  return String(n);
+}
+function pct(a, b){ return b > 0 ? ((a/b)*100).toFixed(1) + "%" : "0.0%"; }
+function dur(sec){
+  sec = Math.max(0, Math.floor(sec));
+  var d = Math.floor(sec/86400), h = Math.floor((sec%86400)/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  if (d) return d + "d " + h + "h";
+  if (h) return h + "h " + m + "m";
+  if (m) return m + "m " + s + "s";
+  return s + "s";
+}
+function ms(v){
+  if (v <= 0) return "ready";
+  if (v < 1000) return v + " ms";
+  return (v/1000).toFixed(1) + " s";
+}
+function setDot(el, cls){ el.className = "dot" + (cls ? " " + cls : ""); }
+
+/* ---------- live stream ---------- */
+
+function connect(){
+  var es = new EventSource(BASE + "/api/stream");
+  es.addEventListener("stats", function(ev){
+    try { render(JSON.parse(ev.data)); }
+    catch (err) { console.error("bad stats frame", err); }
+  });
+  es.addEventListener("open", function(){
+    $("streamState").textContent = "live";
+    setDot($("dotStream"), "ok");
+  });
+  es.addEventListener("error", function(){
+    $("streamState").textContent = "reconnecting";
+    setDot($("dotStream"), "bad");
+    // EventSource retries on its own; nothing to do here.
+  });
+}
+
+/* ---------- rendering ---------- */
+
+function render(p){
+  last = p;
+  var t = p.traffic, l = p.limiter;
+
+  $("version").textContent = p.version;
+  $("upstream").textContent = "upstream: " + p.upstream;
+  $("uptime").textContent = dur(t.uptime_seconds);
+  if (!upstreamDirty) $("upstreamCurrent").textContent = "now: " + p.upstream;
+
+  $("backendState").textContent = l.backend + (l.degraded ? " (fallback)" : "");
+  setDot($("dotBackend"), !l.redis_enabled ? "warn" : (l.degraded ? "bad" : "ok"));
+
+  $("mTotal").textContent = fmt(t.total);
+  $("mRps").textContent = t.rps.toFixed(0) + " req/s";
+  $("mAllowed").textContent = fmt(t.allowed);
+  $("mAllowedPct").textContent = pct(t.allowed, t.total) + " of traffic";
+  $("mBlocked").textContent = fmt(t.blocked);
+  $("mBlockedPct").textContent = pct(t.blocked, t.total) + " throttled";
+  $("mErrors").textContent = fmt(t.errors);
+  $("mLatency").textContent = t.avg_latency_ms.toFixed(1) + " ms";
+  $("mClients").textContent = fmt(t.tracked_clients);
+  $("mKeys").textContent = fmt(l.tracked_keys) + " local keys, " + fmt(l.evictions) + " evicted";
+
+  if (!policyDirty) applyPolicyToForm(p.policy);
+  $("effective").textContent = "= " + p.policy.effective_rps.toFixed(2) + " req/s sustained";
+
+  drawChart(t.series);
+  renderClients(t.clients, p.policy);
+
+  if (l.redis_enabled && l.degraded) {
+    $("fleetNote").className = "note bad";
+    $("fleetNote").style.margin = "0";
+    $("fleetNote").textContent = "redis unreachable, counting locally" + (l.last_error ? ": " + l.last_error : "");
+  } else if (!l.redis_enabled) {
+    $("fleetNote").className = "note muted";
+    $("fleetNote").style.margin = "0";
+    $("fleetNote").textContent = "redis disabled, in-memory limiter only";
+  } else {
+    $("fleetNote").className = "note muted";
+    $("fleetNote").style.margin = "0";
+    $("fleetNote").textContent = fmt(l.redis_served) + " decisions from redis, " + fmt(l.fallback_served) + " from fallback";
+  }
+}
+
+function applyPolicyToForm(policy){
+  $("rps").value = policy.rps;
+  $("window").value = policy.window_seconds;
+}
+
+function renderClients(rows, policy){
+  var body = $("clientRows");
+  body.textContent = "";
+  if (!rows || !rows.length) {
+    var tr = document.createElement("tr");
+    var td = document.createElement("td");
+    td.colSpan = 8; td.className = "empty";
+    td.textContent = "no traffic yet - send a request to / or run the simulator";
+    tr.appendChild(td); body.appendChild(tr);
+    return;
+  }
+  rows.forEach(function(c){
+    var tr = document.createElement("tr");
+    tr.appendChild(cell(c.key.replace(/^(api_key|ip):/, "")));
+    var kind = document.createElement("td");
+    var tag = document.createElement("span");
+    tag.className = "tag " + (c.kind === "api_key" ? "key" : "ip");
+    tag.textContent = c.kind === "api_key" ? "api key" : "ip";
+    kind.appendChild(tag); tr.appendChild(kind);
+    tr.appendChild(cell(fmt(c.requests)));
+    tr.appendChild(cell(fmt(c.blocked)));
+
+    var rem = document.createElement("td");
+    var limit = c.limit || policy.limit || 1;
+    var ratio = Math.max(0, Math.min(1, c.remaining / limit));
+    var bar = document.createElement("div");
+    bar.className = "bar" + (c.remaining === 0 ? " none" : (ratio < 0.34 ? " low" : ""));
+    var fill = document.createElement("i");
+    fill.style.width = (ratio*100).toFixed(1) + "%";
+    bar.appendChild(fill);
+    var label = document.createElement("div");
+    label.style.fontSize = "11px"; label.style.color = "var(--muted)"; label.style.marginTop = "3px";
+    label.textContent = c.remaining + " / " + limit;
+    rem.appendChild(bar); rem.appendChild(label); tr.appendChild(rem);
+
+    tr.appendChild(cell(ms(c.reset_in_ms)));
+    var be = document.createElement("td");
+    var bt = document.createElement("span");
+    bt.className = "tag " + (c.backend === "redis" ? "redis" : "memory");
+    bt.textContent = c.backend || "-";
+    be.appendChild(bt); tr.appendChild(be);
+    tr.appendChild(cell(ms(c.idle_ms)));
+    body.appendChild(tr);
+  });
+}
+
+function cell(text){
+  var td = document.createElement("td");
+  td.textContent = text;
+  return td;
+}
+
+/* ---------- traffic chart ---------- */
+
+var chart = $("chart");
+var ctx = chart.getContext("2d");
+var lastSeries = [];
+
+function niceMax(v){
+  if (v <= 5) return 5;
+  var mag = Math.pow(10, Math.floor(Math.log10(v)));
+  var steps = [1, 2, 2.5, 5, 10];
+  for (var i = 0; i < steps.length; i++) {
+    if (v <= steps[i]*mag) return steps[i]*mag;
+  }
+  return 10*mag;
+}
+
+function drawChart(series){
+  lastSeries = series || [];
+  var dpr = window.devicePixelRatio || 1;
+  var w = chart.clientWidth || 600, h = 220;
+  if (chart.width !== Math.round(w*dpr) || chart.height !== Math.round(h*dpr)) {
+    chart.width = Math.round(w*dpr);
+    chart.height = Math.round(h*dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!lastSeries.length) return;
+
+  var padL = 38, padR = 10, padT = 12, padB = 20;
+  var pw = Math.max(1, w - padL - padR), ph = Math.max(1, h - padT - padB);
+
+  var peak = 0;
+  lastSeries.forEach(function(b){ if (b.total > peak) peak = b.total; });
+  var max = niceMax(peak);
+
+  ctx.strokeStyle = "#222c42";
+  ctx.fillStyle = "#5f6c86";
+  ctx.lineWidth = 1;
+  ctx.font = "10px ui-monospace, monospace";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (var g = 0; g <= 4; g++) {
+    var y = Math.round(padT + ph - (ph*g/4)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL+pw, y); ctx.stroke();
+    ctx.fillText(String(Math.round(max*g/4)), padL - 7, y);
+  }
+
+  var n = lastSeries.length;
+  var slot = pw / n;
+  var barW = Math.max(1, slot - Math.min(3, slot*0.25));
+
+  for (var i = 0; i < n; i++) {
+    var b = lastSeries[i];
+    var x = padL + i*slot + (slot - barW)/2;
+    var y0 = padT + ph;
+    var seg = [
+      { v: b.allowed, c: "#3ecf8e" },
+      { v: b.blocked, c: "#f2545b" },
+      { v: b.errors,  c: "#f5a524" }
+    ];
+    for (var s = 0; s < seg.length; s++) {
+      if (!seg[s].v) continue;
+      var hgt = (seg[s].v / max) * ph;
+      ctx.fillStyle = seg[s].c;
+      ctx.fillRect(x, y0 - hgt, barW, Math.max(1, hgt));
+      y0 -= hgt;
+    }
+  }
+
+  ctx.fillStyle = "#5f6c86";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText("-" + n + "s", padL, padT + ph + 5);
+  ctx.textAlign = "right";
+  ctx.fillText("now", padL + pw, padT + ph + 5);
+
+  $("chartPeak").textContent = "peak " + peak + " req/s";
+}
+
+window.addEventListener("resize", function(){ drawChart(lastSeries); });
+
+function setNote(id, cls, text){
+  var el = $(id);
+  el.className = "note " + cls;
+  if (id === "fleetNote") el.style.margin = "0";
+  el.textContent = text;
+}
+
+/* ---------- policy form ---------- */
+
+["rps", "window"].forEach(function(id){
+  $(id).addEventListener("input", function(){ policyDirty = true; });
+});
+
+$("policyReset").addEventListener("click", function(){
+  if (last) applyPolicyToForm(last.policy);
+  policyDirty = false;
+  setNote("policyNote", "muted", "Reverted to the policy currently in force.");
+});
+
+$("policyForm").addEventListener("submit", function(ev){
+  ev.preventDefault();
+  var body = {
+    rps: parseInt($("rps").value, 10),
+    window_seconds: parseFloat($("window").value)
+  };
+  if (!isFinite(body.rps) || !isFinite(body.window_seconds)) {
+    setNote("policyNote", "bad", "Both fields are required.");
+    return;
+  }
+  $("policyApply").disabled = true;
+  fetch(BASE + "/api/policy", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)
+  }).then(function(res){
+    return res.json().then(function(data){ return {ok: res.ok, data: data}; });
+  }).then(function(r){
+    if (!r.ok) {
+      setNote("policyNote", "bad", r.data.message || "The policy was rejected.");
+      return;
+    }
+    policyDirty = false;
+    var p = r.data.policy;
+    var shared = r.data.shared_with_fleet ? "published to the fleet" : "local only (redis unavailable)";
+    setNote("policyNote", "ok", "Applied " + p.rps + " requests per " + p.window_seconds + "s - " + shared + ".");
+  }).catch(function(err){
+    setNote("policyNote", "bad", "Request failed: " + err.message);
+  }).then(function(){
+    $("policyApply").disabled = false;
+  });
+});
+
+$("clearClients").addEventListener("click", function(){
+  var btn = $("clearClients");
+  btn.disabled = true;
+  fetch(BASE + "/api/clients/reset", {method: "POST"})
+    .then(function(res){ return res.json(); })
+    .then(function(data){
+      setNote("policyNote", "ok", "Cleared tracked clients (" + data.redis_keys_deleted + " redis keys removed).");
+    })
+    .catch(function(err){ setNote("policyNote", "bad", "Reset failed: " + err.message); })
+    .then(function(){ btn.disabled = false; });
+});
+
+/* ---------- upstream target ---------- */
+
+var upstreamDirty = false;
+$("upstreamUrl").addEventListener("input", function(){ upstreamDirty = true; });
+
+// The proxied site lives at the proxy root, so "Open site" points there.
+$("openSite").setAttribute("href", location.origin + "/");
+
+// Prefill the box with the current target once, on first load.
+fetch(BASE + "/api/upstream").then(function(r){ return r.json(); }).then(function(u){
+  if (!upstreamDirty && !u.mock) $("upstreamUrl").value = u.raw_url || "";
+  if (!u.editable) {
+    $("upstreamUrl").disabled = true;
+    $("upstreamApply").disabled = true;
+    setNote("upstreamNote", "muted", "Runtime upstream changes are disabled (UPSTREAM_EDITABLE=false).");
+  }
+}).catch(function(){});
+
+$("upstreamForm").addEventListener("submit", function(ev){
+  ev.preventDefault();
+  var url = $("upstreamUrl").value.trim();
+  if (!url) { setNote("upstreamNote", "bad", "Enter a URL first."); return; }
+  $("upstreamApply").disabled = true;
+  fetch(BASE + "/api/upstream", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({url: url})
+  }).then(function(res){
+    return res.json().then(function(data){ return {ok: res.ok, data: data}; });
+  }).then(function(r){
+    if (!r.ok) {
+      setNote("upstreamNote", "bad", r.data.message || "The upstream was rejected.");
+      return;
+    }
+    upstreamDirty = false;
+    var target = r.data.upstream.target;
+    var shared = r.data.shared_with_fleet ? "shared with the fleet" : "local only (redis unavailable)";
+    setNote("upstreamNote", "ok", "Proxy now forwards to " + target + " - " + shared + ".");
+  }).catch(function(err){
+    setNote("upstreamNote", "bad", "Request failed: " + err.message);
+  }).then(function(){
+    $("upstreamApply").disabled = false;
+  });
+});
+
+/* ---------- stress simulator ---------- */
+
+var stress = {ok: 0, blocked: 0, err: 0, running: false};
+
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+function paintStress(total){
+  $("sOk").textContent = stress.ok;
+  $("sBlocked").textContent = stress.blocked;
+  var done = stress.ok + stress.blocked + stress.err;
+  var base = Math.max(1, done || total);
+  var bars = $("stressStack").children;
+  bars[0].style.width = (stress.ok/base*100) + "%";
+  bars[1].style.width = (stress.blocked/base*100) + "%";
+  bars[2].style.width = (stress.err/base*100) + "%";
+}
+
+function resetStress(){
+  stress.ok = 0; stress.blocked = 0; stress.err = 0;
+  $("stressStrip").textContent = "";
+  paintStress(0);
+}
+
+$("stressClear").addEventListener("click", function(){
+  if (stress.running) return;
+  resetStress();
+  setNote("stressNote", "muted", "Each cell is one request, in dispatch order.");
+});
+
+$("stressForm").addEventListener("submit", function(ev){
+  ev.preventDefault();
+  if (stress.running) return;
+
+  var total = clamp(parseInt($("stressCount").value, 10) || 50, 1, 500);
+  var conc = clamp(parseInt($("stressConc").value, 10) || 25, 1, 100);
+  var key = $("stressKey").value.trim();
+  var path = $("stressPath").value.trim() || "/";
+  if (path.charAt(0) !== "/") path = "/" + path;
+
+  resetStress();
+  stress.running = true;
+  $("stressRun").disabled = true;
+  setNote("stressNote", "muted", "Firing " + total + " requests at concurrency " + conc + "...");
+
+  var strip = $("stressStrip");
+  var next = 0;
+  var startedAt = performance.now();
+
+  function one(){
+    if (next >= total) return Promise.resolve();
+    next++;
+    var cellEl = document.createElement("span");
+    cellEl.className = "cell";
+    strip.appendChild(cellEl);
+
+    var headers = {"Accept": "application/json"};
+    if (key) headers["X-API-Key"] = key;
+
+    return fetch(path, {headers: headers, cache: "no-store"})
+      .then(function(res){
+        if (res.status === 429) { stress.blocked++; cellEl.className = "cell blocked"; }
+        else if (res.ok) { stress.ok++; cellEl.className = "cell ok"; }
+        else { stress.err++; cellEl.className = "cell err"; }
+      })
+      .catch(function(){ stress.err++; cellEl.className = "cell err"; })
+      .then(function(){ paintStress(total); return one(); });
+  }
+
+  var lanes = [];
+  for (var i = 0; i < Math.min(conc, total); i++) lanes.push(one());
+
+  Promise.all(lanes).then(function(){
+    stress.running = false;
+    $("stressRun").disabled = false;
+    var elapsed = (performance.now() - startedAt) / 1000;
+    var rate = elapsed > 0 ? (total/elapsed).toFixed(0) : total;
+    setNote("stressNote", stress.blocked > 0 ? "ok" : "muted",
+      total + " requests in " + elapsed.toFixed(2) + "s (~" + rate + " req/s): " +
+      stress.ok + " allowed, " + stress.blocked + " throttled, " + stress.err + " failed.");
+  });
+});
+
+/* ---------- boot ---------- */
+
+$("epStats").textContent  = "GET " + BASE + "/api/stats";
+$("epStream").textContent = "GET " + BASE + "/api/stream";
+$("epPolicy").textContent = "PUT " + BASE + "/api/policy";
+
+fetch(BASE + "/api/stats").then(function(r){ return r.json(); }).then(render).catch(function(){});
+connect();
+})();
+</script>
+</body>
+</html>
