@@ -77,11 +77,6 @@ docker compose -f docker-compose.deploy.yml up --build -d
 If your app also runs in Docker, put it in the same compose file / network and
 use its service name as `UPSTREAM_URL` (e.g. `http://app:3000`).
 
-> Docker is not installed on the machine this project was built on, so the
-> compose commands here are not machine-verified. The compose file is valid YAML
-> and the container envs mirror the flags below, which **are** verified by
-> running the binary directly.
-
 ---
 
 ## 3. Standalone binary (systemd)
@@ -181,7 +176,7 @@ tool can change it for you; you point it once, by hand.
 
 ### What you need first
 
-- A **domain** you control (e.g. `oxmaint.es`).
+- A **domain** you control (e.g. `example.com`).
 - A **server with a public, static IP** running the proxy. A home laptop behind
   a router will not work — it has no reachable public IP. Use a small VPS
   (Hetzner, DigitalOcean, AWS Lightsail, …).
@@ -201,16 +196,16 @@ tool can change it for you; you point it once, by hand.
    | Field | Value |
    | --- | --- |
    | Type | `A` (use `AAAA` for an IPv6 address) |
-   | Name | `@` for the root `oxmaint.es`, or a subdomain like `app` / `dms` |
+   | Name | `@` for the root `example.com`, or a subdomain like `api` / `app` |
    | Value / Points to | your server IP, `203.0.113.50` |
    | TTL | Auto (or 300s) |
 
 4. **Save.** Propagation takes minutes (sometimes up to an hour). Check it:
    ```bash
-   nslookup dms.oxmaint.es      # should return your server IP
+   nslookup app.example.com     # should return your server IP
    ```
 
-### On Cloudflare specifically (your site is behind Cloudflare)
+### On Cloudflare
 
 DNS → **Add record** → Type `A`, Name, IPv4 = server IP. The **orange cloud**
 toggle decides the shape:
@@ -230,8 +225,8 @@ Once the domain points at the proxy, the proxy's `UPSTREAM_URL` must point at
 your app's **real origin**, never back at the public domain:
 
 ```
-WRONG:  dms.oxmaint.es → proxy → https://dms.oxmaint.es   (infinite loop)
-RIGHT:  dms.oxmaint.es → proxy → http://10.0.0.5:3000      (the app's origin)
+WRONG:  app.example.com → proxy → https://app.example.com  (infinite loop)
+RIGHT:  app.example.com → proxy → http://10.0.0.5:3000     (the app's origin)
 ```
 
 Give the origin its own name or use its internal IP, and set that as
