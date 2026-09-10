@@ -500,3 +500,88 @@ func TestUpstreamChangeForbiddenWhenLocked(t *testing.T) {
 		t.Errorf("PUT upstream with no proxy handle: status %d, want 403", res.StatusCode)
 	}
 }
+
+// newFixtureWithToken wires the control plane with an admin token set.
+func newFixtureWithToken(t *testing.T, token string) *fixture {
+	t.Helper()
+	f := newFixtureAt(t, "")
+	srv, err := New(Options{
+		Limiter: f.manager, Metrics: f.metrics, Hub: metrics.NewHub(4),
+		Upstream: nil, AdminToken: token, Logger: quiet(), Version: "test",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	mux := http.NewServeMux()
+	srv.Register(mux, "")
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	f.server = ts
+	f.api = srv
+	return f
+}
+
+func TestAdminTokenProtectsControlPlane(t *testing.T) {
+	const token = "s3cret-token"
+	f := newFixtureWithToken(t, token)
+
+	// No credentials -> 401 with a Basic challenge so browsers prompt.
+	res, _ := f.do(t, http.MethodGet, "/api/stats", "", nil)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no token: status %d, want 401", res.StatusCode)
+	}
+	if ch := res.Header.Get("WWW-Authenticate"); !strings.Contains(ch, "Basic") {
+		t.Errorf("WWW-Authenticate = %q, want a Basic challenge", ch)
+	}
+
+	// Each accepted credential form should unlock it.
+	forms := []struct {
+		name string
+		set  func(*http.Request)
+	}{
+		{"bearer", func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }},
+		{"x-admin-token", func(r *http.Request) { r.Header.Set("X-Admin-Token", token) }},
+		{"basic", func(r *http.Request) { r.SetBasicAuth("admin", token) }},
+	}
+	for _, tc := range forms {
+		t.Run(tc.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodGet, f.server.URL+"/api/stats", nil)
+			tc.set(req)
+			res, err := f.server.Client().Do(req)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Errorf("%s: status %d, want 200", tc.name, res.StatusCode)
+			}
+		})
+	}
+
+	// A wrong token stays rejected.
+	req, _ := http.NewRequest(http.MethodGet, f.server.URL+"/api/stats", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	res, _ = f.server.Client().Do(req)
+	res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("wrong token: status %d, want 401", res.StatusCode)
+	}
+}
+
+func TestAdminTokenLeavesHealthOpen(t *testing.T) {
+	f := newFixtureWithToken(t, "s3cret-token")
+	// Container / LB probes must work without the token.
+	for _, path := range []string{"/healthz", "/readyz", "/api/health"} {
+		if res, _ := f.do(t, http.MethodGet, path, "", nil); res.StatusCode != http.StatusOK {
+			t.Errorf("%s: status %d, want 200 without a token", path, res.StatusCode)
+		}
+	}
+}
+
+func TestNoTokenMeansOpen(t *testing.T) {
+	// The default (empty token) keeps the control plane open, as before.
+	f := newFixture(t)
+	if res, _ := f.do(t, http.MethodGet, "/api/stats", "", nil); res.StatusCode != http.StatusOK {
+		t.Errorf("status %d, want 200 when no token is configured", res.StatusCode)
+	}
+}

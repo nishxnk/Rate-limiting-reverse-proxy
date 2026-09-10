@@ -271,3 +271,30 @@ func TestAdminAddrValidation(t *testing.T) {
 		t.Errorf("Validate() rejected a valid ADMIN_ADDR: %v", err)
 	}
 }
+
+func TestUpstreamEditableDefaultsOff(t *testing.T) {
+	t.Setenv("UPSTREAM_EDITABLE", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UpstreamEditable {
+		t.Error("UPSTREAM_EDITABLE default = true, want false (SSRF lever off by default)")
+	}
+	t.Setenv("UPSTREAM_EDITABLE", "true")
+	cfg, _ = Load()
+	if !cfg.UpstreamEditable {
+		t.Error("UPSTREAM_EDITABLE=true was not honoured")
+	}
+}
+
+func TestAdminTokenLoads(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "")
+	if cfg, _ := Load(); cfg.AdminToken != "" {
+		t.Errorf("AdminToken default = %q, want empty", cfg.AdminToken)
+	}
+	t.Setenv("ADMIN_TOKEN", "hunter2")
+	if cfg, _ := Load(); cfg.AdminToken != "hunter2" {
+		t.Errorf("AdminToken = %q, want hunter2", cfg.AdminToken)
+	}
+}

@@ -43,8 +43,8 @@ type Config struct {
 	UpstreamTimeout   time.Duration
 	TrustProxyHeaders bool
 	// UpstreamEditable allows the target origin to be changed at runtime from
-	// the dashboard. It is convenient for a demo but is an SSRF / open-relay
-	// lever, so it can be turned off in a hardened deployment.
+	// the dashboard. It is an SSRF / open-relay lever, so it is OFF by default;
+	// turn it on (UPSTREAM_EDITABLE=true) only for a local demo.
 	UpstreamEditable bool
 
 	// Dashboard and control plane
@@ -61,6 +61,11 @@ type Config struct {
 	// dashboard is never exposed alongside it. This is the recommended shape
 	// for a deployment that sits in front of a real application.
 	AdminAddr string
+	// AdminToken, when set, requires callers of the dashboard and control API to
+	// present it (HTTP Basic password, a Bearer token, or an X-Admin-Token
+	// header). Health and readiness probes stay open so container/LB checks keep
+	// working. Empty disables the check.
+	AdminToken string
 
 	LogLevel string
 }
@@ -136,12 +141,13 @@ func Load() (Config, error) {
 		UpstreamURL:       envString("UPSTREAM_URL", "mock://internal"),
 		UpstreamTimeout:   envDuration("UPSTREAM_TIMEOUT", 30*time.Second),
 		TrustProxyHeaders: envBool("TRUST_PROXY_HEADERS", false),
-		UpstreamEditable:  envBool("UPSTREAM_EDITABLE", true),
+		UpstreamEditable:  envBool("UPSTREAM_EDITABLE", false),
 
 		DashboardEnabled: envBool("DASHBOARD_ENABLED", true),
 		MetricsWindow:    envInt("METRICS_WINDOW_SECONDS", 60),
 		AdminPrefix:      NormalizePrefix(envString("ADMIN_PREFIX", DefaultAdminPrefix)),
 		AdminAddr:        envString("ADMIN_ADDR", ""),
+		AdminToken:       envString("ADMIN_TOKEN", ""),
 
 		LogLevel: envString("LOG_LEVEL", "info"),
 	}

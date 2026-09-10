@@ -22,9 +22,9 @@ yourself.
 ## How it works
 
 ```
-request ──► [ rate limiter ]  ──► your app        (allowed)
+frontend ──► [ rate limiter ] ──► server      (allowed)
                    │
-                   └──────────────► 429            (over the limit)
+                   └──────────────► 429        (too many requests)
 ```
 
 Every response also carries `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
@@ -111,12 +111,14 @@ Set these as environment variables (all have sensible defaults):
 | `WINDOW_SIZE_SECONDS` | `1` | Length of the window in seconds |
 | `REDIS_ADDR` | `localhost:6379` | Redis address, or `disabled` |
 | `ADMIN_ADDR` | *(empty)* | Put the dashboard on its own port (recommended in production) |
+| `ADMIN_TOKEN` | *(empty)* | Require this token for the dashboard + control API |
 
 There are a few more (timeouts, circuit breaker, admin path) — see
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and `.env.example`.
 
-> **Note:** the dashboard has no password. In production set `ADMIN_ADDR` (e.g.
-> `127.0.0.1:9090`) so it stays private, and don't expose it to the internet.
+> **Note:** the dashboard is open by default (fine locally). Before exposing it,
+> set `ADMIN_TOKEN` (browser prompts for it; scripts send `Authorization: Bearer
+> <token>`) and/or put it on a private port with `ADMIN_ADDR=127.0.0.1:9090`.
 
 ---
 
