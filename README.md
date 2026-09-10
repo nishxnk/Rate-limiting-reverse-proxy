@@ -22,9 +22,9 @@ yourself.
 ## How it works
 
 ```
-request ──► [ rate limiter ]  ──► your app        (allowed)
+frontend ──► [ rate limiter ] ──► server      (allowed)
                    │
-                   └──────────────► 429            (over the limit)
+                   └──────────────► 429        (too many requests)
 ```
 
 Every response also carries `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
